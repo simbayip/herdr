@@ -219,17 +219,42 @@ impl App {
     }
 
     fn prepare_popup_key_forward(&mut self, key: TerminalKey) -> PreparedPopupInput {
-        if self.state.popup_pane.is_none() {
-            return PreparedPopupInput::NotOpen;
-        }
-        let Some(terminal_id) = self
-            .state
-            .popup_pane
-            .as_ref()
-            .map(|popup| popup.terminal_id.clone())
-        else {
+        let Some(popup) = self.state.popup_pane.as_ref() else {
             return PreparedPopupInput::NotOpen;
         };
+        if !popup.focused {
+            return PreparedPopupInput::NotOpen;
+        }
+
+        if let Some(action) = super::terminal_direct_non_indexed_navigation_action(&self.state, key) {
+            if action == super::navigate::NavigateAction::EditScrollback {
+                self.launch_focused_scrollback_editor();
+            } else {
+                self.execute_tui_navigate_action(action, super::navigate::ActionContext::Direct);
+            }
+            return PreparedPopupInput::Consumed;
+        }
+
+        if let Some(binding) = super::navigate::command_for_key(
+            &self.state,
+            key,
+            super::navigate::BindingDispatch::Direct,
+        ) {
+            self.launch_custom_command(binding, super::navigate::ActionContext::Direct);
+            return PreparedPopupInput::Consumed;
+        }
+
+        if let Some(action) = super::terminal_direct_indexed_navigation_action(&self.state, key) {
+            self.execute_tui_navigate_action(action, super::navigate::ActionContext::Direct);
+            return PreparedPopupInput::Consumed;
+        }
+
+        if self.state.is_prefix_key(key) {
+            self.state.mode = Mode::Prefix;
+            return PreparedPopupInput::Consumed;
+        }
+
+        let terminal_id = popup.terminal_id.clone();
         let Some(rt) = self.terminal_runtimes.get(&terminal_id) else {
             self.close_popup_pane();
             return PreparedPopupInput::Consumed;

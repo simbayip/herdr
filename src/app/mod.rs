@@ -5696,6 +5696,8 @@ last_pane = "prefix+tab"
                 terminal_id: popup_terminal_id,
                 width: None,
                 height: None,
+                target_pane_id: None,
+                focused: true,
             });
         };
         install_missing_popup(&mut app);

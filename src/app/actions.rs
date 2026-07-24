@@ -312,6 +312,18 @@ impl AppState {
     }
 
     pub(crate) fn focus_pane_in_workspace(&mut self, ws_idx: usize, pane_id: PaneId) -> bool {
+        if let Some(popup) = self.popup_pane.as_mut() {
+            if pane_id == popup.pane_id {
+                let changed = !popup.focused;
+                popup.focused = true;
+                if self.copy_mode.is_some() {
+                    self.clear_copy_mode_selection();
+                }
+                return changed;
+            }
+            popup.focused = false;
+        }
+
         let Some(ws) = self.workspaces.get(ws_idx) else {
             return false;
         };
@@ -326,7 +338,6 @@ impl AppState {
         if previous.as_ref() == Some(&target) {
             return false;
         }
-
         if self.copy_mode.is_some() {
             self.clear_copy_mode_selection();
         }
@@ -1713,14 +1724,7 @@ impl AppState {
         let Some(ws_idx) = self.active else {
             return;
         };
-        let Some(tab) = self.workspaces.get(ws_idx).and_then(|ws| ws.active_tab()) else {
-            return;
-        };
-        let panes = if tab.zoomed {
-            tab.layout.panes(self.view.terminal_area)
-        } else {
-            self.view.pane_infos.clone()
-        };
+        let panes = self.visible_spatial_pane_infos();
 
         if let Some(focused) = panes.iter().find(|p| p.is_focused) {
             if let Some(target) = find_in_direction(focused, direction, &panes) {

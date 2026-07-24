@@ -336,15 +336,9 @@ impl App {
         else {
             return encode_error(id, "pane_not_found", "pane not found");
         };
-        let Some(tab_idx) = self.state.workspaces[ws_idx].find_tab_index_for_pane(source_pane_id)
-        else {
-            return pane_not_found(
-                id,
-                &self
-                    .public_pane_id(ws_idx, source_pane_id)
-                    .unwrap_or_default(),
-            );
-        };
+        let tab_idx = self.state.workspaces[ws_idx]
+            .find_tab_index_for_pane(source_pane_id)
+            .unwrap_or_else(|| self.state.workspaces[ws_idx].active_tab_index());
         let Some(source_public_id) = self.public_pane_id(ws_idx, source_pane_id) else {
             return encode_error(id, "pane_not_found", "pane not found");
         };
@@ -359,13 +353,25 @@ impl App {
             self.state.switch_workspace_tab(ws_idx, tab_idx);
             self.state.settle_terminal_mode_after_focus();
         }
-        let focused_pane_id = self
-            .state
-            .workspaces
-            .get(ws_idx)
-            .and_then(|ws| ws.tabs.get(tab_idx))
-            .map(|tab| tab.layout.focused())
-            .and_then(|pane_id| self.public_pane_id(ws_idx, pane_id));
+        let focused_pane_id = if let Some(popup) = self.state.popup_pane.as_ref() {
+            if popup.focused {
+                self.public_pane_id(ws_idx, popup.pane_id)
+            } else {
+                self.state
+                    .workspaces
+                    .get(ws_idx)
+                    .and_then(|ws| ws.tabs.get(tab_idx))
+                    .map(|tab| tab.layout.focused())
+                    .and_then(|pane_id| self.public_pane_id(ws_idx, pane_id))
+            }
+        } else {
+            self.state
+                .workspaces
+                .get(ws_idx)
+                .and_then(|ws| ws.tabs.get(tab_idx))
+                .map(|tab| tab.layout.focused())
+                .and_then(|pane_id| self.public_pane_id(ws_idx, pane_id))
+        };
         let Some(layout) = self.pane_layout_snapshot(ws_idx, tab_idx) else {
             return encode_error(id, "pane_layout_unavailable", "pane layout unavailable");
         };
@@ -1653,6 +1659,11 @@ impl App {
             Some(pane_id) => self.parse_pane_id(pane_id),
             None => {
                 let ws_idx = self.state.active?;
+                if let Some(popup) = self.state.popup_pane.as_ref() {
+                    if popup.focused {
+                        return Some((ws_idx, popup.pane_id));
+                    }
+                }
                 let pane_id = self.state.workspaces.get(ws_idx)?.focused_pane_id()?;
                 Some((ws_idx, pane_id))
             }
@@ -1665,13 +1676,12 @@ impl App {
 
     fn directional_pane_target(
         &self,
-        ws_idx: usize,
-        tab_idx: usize,
+        _ws_idx: usize,
+        _tab_idx: usize,
         source_pane_id: PaneId,
         direction: PaneDirection,
     ) -> Option<PaneId> {
-        let tab = self.state.workspaces.get(ws_idx)?.tabs.get(tab_idx)?;
-        let panes = tab.layout.panes(self.state.view.terminal_area);
+        let panes = self.state.visible_spatial_pane_infos();
         let source = panes.iter().find(|pane| pane.id == source_pane_id)?;
         find_in_direction(source, direction.into(), &panes)
     }
@@ -3518,9 +3528,11 @@ mod tests {
     #[test]
     fn api_pane_neighbor_returns_directional_neighbor_public_id() {
         let mut app = app_with_linked_worktree();
+        app.state.active = Some(0);
+        app.state.selected = 0;
         let root = app.state.workspaces[0].tabs[0].root_pane;
         let right = app.state.workspaces[0].test_split(ratatui::layout::Direction::Horizontal);
-        app.state.workspaces[0].tabs[0].layout.focus_pane(root);
+        app.state.focus_pane_in_workspace(0, root);
         crate::ui::compute_view(&mut app.state, ratatui::layout::Rect::new(0, 0, 100, 20));
         let root_public = app.public_pane_id(0, root).unwrap();
         let right_public = app.public_pane_id(0, right).unwrap();
@@ -3610,9 +3622,11 @@ mod tests {
     #[test]
     fn api_pane_focus_direction_focuses_neighbor() {
         let mut app = app_with_linked_worktree();
+        app.state.active = Some(0);
+        app.state.selected = 0;
         let root = app.state.workspaces[0].tabs[0].root_pane;
         let right = app.state.workspaces[0].test_split(ratatui::layout::Direction::Horizontal);
-        app.state.workspaces[0].tabs[0].layout.focus_pane(root);
+        app.state.focus_pane_in_workspace(0, root);
         crate::ui::compute_view(&mut app.state, ratatui::layout::Rect::new(0, 0, 100, 20));
         let root_public = app.public_pane_id(0, root).unwrap();
         let right_public = app.public_pane_id(0, right).unwrap();
@@ -3741,6 +3755,71 @@ mod tests {
         assert_eq!(focus.source_pane_id, root_public.clone());
         assert_eq!(focus.focused_pane_id, Some(root_public));
         assert_eq!(app.state.workspaces[0].focused_pane_id(), Some(root));
+    }
+
+    #[test]
+    fn api_pane_focus_direction_between_layout_pane_and_anchored_popup() {
+        let mut app = app_with_linked_worktree();
+        app.state.active = Some(0);
+        app.state.selected = 0;
+        let left = app.state.workspaces[0].tabs[0].root_pane;
+        let right = app.state.workspaces[0].test_split(ratatui::layout::Direction::Horizontal);
+        app.state.workspaces[0].tabs[0].layout.focus_pane(left);
+        crate::ui::compute_view(&mut app.state, ratatui::layout::Rect::new(0, 0, 100, 20));
+
+        let popup_terminal_id = crate::terminal::TerminalId::alloc();
+        let popup_pane_id = crate::layout::PaneId::alloc();
+        app.state.terminals.insert(
+            popup_terminal_id.clone(),
+            crate::terminal::TerminalState::new(
+                popup_terminal_id.clone(),
+                std::path::PathBuf::from("/popup"),
+            ),
+        );
+        app.state.popup_pane = Some(crate::app::state::PopupPaneState {
+            pane_id: popup_pane_id,
+            terminal_id: popup_terminal_id,
+            width: Some(crate::popup_size::PopupSize::Percent(100)),
+            height: Some(crate::popup_size::PopupSize::Percent(100)),
+            target_pane_id: Some(left),
+            focused: true,
+        });
+
+        let right_public = app.public_pane_id(0, right).unwrap();
+        let popup_public = app.public_pane_id(0, popup_pane_id).unwrap();
+
+        // 1. Move Right from focused popup -> should target right layout pane (sidebar)
+        let response = app.handle_pane_focus_direction(
+            "req1".into(),
+            crate::api::schema::PaneFocusDirectionParams {
+                pane_id: None,
+                direction: PaneDirection::Right,
+            },
+        );
+        let success: SuccessResponse = serde_json::from_str(&response).unwrap();
+        let ResponseResult::PaneFocusDirection { focus } = success.result else {
+            panic!("expected pane focus direction response");
+        };
+        assert!(focus.changed);
+        assert_eq!(focus.source_pane_id, popup_public);
+        assert_eq!(focus.focused_pane_id, Some(right_public.clone()));
+        assert!(!app.state.popup_pane.as_ref().unwrap().focused);
+
+        // 2. Move Left from right layout pane -> should target anchored popup pane
+        let response2 = app.handle_pane_focus_direction(
+            "req2".into(),
+            crate::api::schema::PaneFocusDirectionParams {
+                pane_id: Some(right_public),
+                direction: PaneDirection::Left,
+            },
+        );
+        let success2: SuccessResponse = serde_json::from_str(&response2).unwrap();
+        let ResponseResult::PaneFocusDirection { focus: focus2 } = success2.result else {
+            panic!("expected pane focus direction response");
+        };
+        assert!(focus2.changed);
+        assert_eq!(focus2.focused_pane_id, Some(popup_public));
+        assert!(app.state.popup_pane.as_ref().unwrap().focused);
     }
 
     #[test]

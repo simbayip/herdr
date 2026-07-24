@@ -1759,6 +1759,44 @@ impl AppState {
         }
         ws.active_tab().map(|tab| tab.layout.focused()) == Some(pane_id)
     }
+
+    pub(crate) fn visible_spatial_pane_infos(&self) -> Vec<crate::layout::PaneInfo> {
+        let Some(ws_idx) = self.active else {
+            return Vec::new();
+        };
+        let tab = self.workspaces.get(ws_idx).and_then(|ws| ws.active_tab());
+        let mut panes = if self.view.terminal_area.width > 0 && self.view.terminal_area.height > 0 {
+            tab.map(|t| t.layout.panes(self.view.terminal_area)).unwrap_or_default()
+        } else {
+            Vec::new()
+        };
+        if panes.is_empty() && !self.view.pane_infos.is_empty() {
+            panes = self.view.pane_infos.clone();
+        }
+
+        if let Some(popup) = self.popup_pane.as_ref() {
+            if let Some((outer, _inner)) = crate::ui::popup_pane_rects(self, self.view.terminal_area) {
+                if popup.focused {
+                    for p in &mut panes {
+                        p.is_focused = false;
+                    }
+                }
+                panes.insert(
+                    0,
+                    crate::layout::PaneInfo {
+                        id: popup.pane_id,
+                        rect: outer,
+                        inner_rect: outer,
+                        scrollbar_rect: None,
+                        borders: ratatui::widgets::Borders::ALL,
+                        is_focused: popup.focused,
+                    },
+                );
+            }
+        }
+
+        panes
+    }
 }
 
 #[cfg(test)]
@@ -2522,5 +2560,40 @@ mod tests {
                 "Collapse"
             ]
         );
+    }
+
+    #[test]
+    fn visible_spatial_pane_infos_places_popup_overlay_first_and_clears_tiled_focus() {
+        let mut state = AppState::test_new();
+        state.workspaces = vec![crate::workspace::Workspace::test_new("test")];
+        state.active = Some(0);
+        let left = state.workspaces[0].tabs[0].root_pane;
+        let _right = state.workspaces[0].test_split(ratatui::layout::Direction::Horizontal);
+        state.workspaces[0].tabs[0].layout.focus_pane(left);
+        state.view.terminal_area = ratatui::layout::Rect::new(0, 0, 100, 20);
+
+        let popup_terminal_id = crate::terminal::TerminalId::alloc();
+        let popup_pane_id = crate::layout::PaneId::alloc();
+        state.terminals.insert(
+            popup_terminal_id.clone(),
+            crate::terminal::TerminalState::new(
+                popup_terminal_id.clone(),
+                std::path::PathBuf::from("/popup"),
+            ),
+        );
+        state.popup_pane = Some(PopupPaneState {
+            pane_id: popup_pane_id,
+            terminal_id: popup_terminal_id,
+            width: Some(crate::popup_size::PopupSize::Percent(100)),
+            height: Some(crate::popup_size::PopupSize::Percent(100)),
+            target_pane_id: Some(left),
+            focused: true,
+        });
+
+        let panes = state.visible_spatial_pane_infos();
+        assert_eq!(panes[0].id, popup_pane_id);
+        assert!(panes[0].is_focused);
+        assert!(!panes[1].is_focused);
+        assert!(!panes[2].is_focused);
     }
 }

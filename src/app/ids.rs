@@ -29,6 +29,11 @@ impl App {
         ws_idx: usize,
         pane_id: crate::layout::PaneId,
     ) -> Option<String> {
+        if let Some(popup) = self.state.popup_pane.as_ref() {
+            if popup.pane_id == pane_id {
+                return Some(format!("p_{}", pane_id.raw()));
+            }
+        }
         let ws = self.state.workspaces.get(ws_idx)?;
         let pane_number = ws.public_pane_number(pane_id)?;
         Some(crate::workspace::public_pane_id_for_number(
@@ -100,6 +105,11 @@ impl App {
         if self.find_pane(pane_id).is_some() {
             return Some(pane_id);
         }
+        if let Some(popup) = self.state.popup_pane.as_ref() {
+            if popup.pane_id == pane_id {
+                return Some(pane_id);
+            }
+        }
         None
     }
 
@@ -112,11 +122,22 @@ impl App {
             if let Some((ws_raw, pane_raw)) = rest.rsplit_once('_') {
                 let ws_idx = self.parse_workspace_id(ws_raw)?;
                 let pane_id = self.resolve_raw_pane_id(pane_raw.parse::<u32>().ok()?)?;
+                if let Some(popup) = self.state.popup_pane.as_ref() {
+                    if popup.pane_id == pane_id {
+                        return Some((ws_idx, pane_id));
+                    }
+                }
                 self.state.workspaces.get(ws_idx)?.pane_state(pane_id)?;
                 return Some((ws_idx, pane_id));
             }
 
             let pane_id = self.resolve_raw_pane_id(rest.parse::<u32>().ok()?)?;
+            if let Some(popup) = self.state.popup_pane.as_ref() {
+                if popup.pane_id == pane_id {
+                    let ws_idx = self.state.active.unwrap_or(0);
+                    return Some((ws_idx, pane_id));
+                }
+            }
             return self.find_pane(pane_id).map(|(ws_idx, _)| (ws_idx, pane_id));
         }
 

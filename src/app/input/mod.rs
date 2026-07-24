@@ -75,7 +75,7 @@ impl App {
         &mut self,
         key: TerminalKey,
     ) -> Option<super::TerminalInputTarget> {
-        if self.state.popup_pane.is_some() {
+        if self.state.popup_pane.as_ref().is_some_and(|p| p.focused) {
             return self.handle_terminal_key(key).await;
         }
         let key_event = key.as_key_event();
@@ -425,6 +425,9 @@ impl App {
             || mouse.row >= inner.y.saturating_add(inner.height)
         {
             return;
+        }
+        if let Some(popup) = self.state.popup_pane.as_mut() {
+            popup.focused = true;
         }
         let Some(rt) = self.popup_runtime() else {
             self.close_popup_pane();

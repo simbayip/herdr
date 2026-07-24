@@ -657,14 +657,9 @@ impl App {
         direction: NavDirection,
     ) -> Option<(usize, crate::layout::PaneId)> {
         let ws_idx = self.state.active?;
-        let focused = self
-            .state
-            .view
-            .pane_infos
-            .iter()
-            .find(|pane| pane.is_focused)?;
-        let target =
-            crate::layout::find_in_direction(focused, direction, &self.state.view.pane_infos)?;
+        let panes = self.state.visible_spatial_pane_infos();
+        let focused = panes.iter().find(|pane| pane.is_focused)?;
+        let target = crate::layout::find_in_direction(focused, direction, &panes)?;
         Some((ws_idx, target))
     }
 
@@ -800,6 +795,7 @@ impl App {
             crate::app::popup::PopupGeometry {
                 width: binding.width,
                 height: binding.height,
+                target_pane_id: None,
             },
         )
     }
@@ -3352,5 +3348,49 @@ navigate_pane_down = "ctrl+j"
 
         assert!(state.detach_requested);
         assert!(!state.should_quit);
+    }
+
+    #[test]
+    fn navigate_pane_directional_movement_between_layout_pane_and_anchored_popup() {
+        let mut state = state_with_workspaces(&["test"]);
+        state.active = Some(0);
+        state.selected = 0;
+        state.mode = Mode::Navigate;
+        let left = state.workspaces[0].tabs[0].root_pane;
+        let right = state.workspaces[0].test_split(Direction::Horizontal);
+        state.workspaces[0].layout.focus_pane(left);
+        state.view.terminal_area = ratatui::layout::Rect::new(0, 0, 100, 20);
+        state.view.pane_infos = state.workspaces[0]
+            .active_tab()
+            .unwrap()
+            .layout
+            .panes(state.view.terminal_area);
+
+        let popup_terminal_id = crate::terminal::TerminalId::alloc();
+        let popup_pane_id = crate::layout::PaneId::alloc();
+        state.terminals.insert(
+            popup_terminal_id.clone(),
+            crate::terminal::TerminalState::new(
+                popup_terminal_id.clone(),
+                std::path::PathBuf::from("/popup"),
+            ),
+        );
+        state.popup_pane = Some(crate::app::state::PopupPaneState {
+            pane_id: popup_pane_id,
+            terminal_id: popup_terminal_id,
+            width: Some(crate::popup_size::PopupSize::Percent(100)),
+            height: Some(crate::popup_size::PopupSize::Percent(100)),
+            target_pane_id: Some(left),
+            focused: true,
+        });
+
+        // 1. Navigate Right from focused popup -> focus shifts to right layout pane
+        state.navigate_pane(NavDirection::Right);
+        assert_eq!(state.workspaces[0].focused_pane_id(), Some(right));
+        assert!(!state.popup_pane.as_ref().unwrap().focused);
+
+        // 2. Navigate Left from right layout pane -> focus shifts back to anchored popup pane
+        state.navigate_pane(NavDirection::Left);
+        assert!(state.popup_pane.as_ref().unwrap().focused);
     }
 }
