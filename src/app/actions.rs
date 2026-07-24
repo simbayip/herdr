@@ -312,6 +312,7 @@ impl AppState {
     }
 
     pub(crate) fn focus_pane_in_workspace(&mut self, ws_idx: usize, pane_id: PaneId) -> bool {
+        let popup_was_focused = self.popup_pane.as_ref().is_some_and(|p| p.focused);
         if let Some(popup) = self.popup_pane.as_mut() {
             if pane_id == popup.pane_id {
                 let changed = !popup.focused;
@@ -335,7 +336,7 @@ impl AppState {
             workspace_id: ws.id.clone(),
             pane_id,
         };
-        if previous.as_ref() == Some(&target) {
+        if !popup_was_focused && previous.as_ref() == Some(&target) {
             return false;
         }
         if self.copy_mode.is_some() {

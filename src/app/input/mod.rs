@@ -281,8 +281,7 @@ impl App {
             _ => {}
         }
 
-        if self.state.popup_pane.is_some() {
-            self.handle_popup_mouse(mouse);
+        if self.state.popup_pane.is_some() && self.handle_popup_mouse(mouse) {
             return;
         }
         if self.handle_overlay_mouse(mouse) {
@@ -413,63 +412,72 @@ impl App {
         }
     }
 
-    fn handle_popup_mouse(&mut self, mouse: MouseEvent) {
-        let Some((_outer, inner)) =
+    fn handle_popup_mouse(&mut self, mouse: MouseEvent) -> bool {
+        let Some((outer, inner)) =
             crate::ui::popup_pane_rects(&self.state, self.state.view.terminal_area)
         else {
-            return;
+            return false;
         };
-        if mouse.column < inner.x
-            || mouse.column >= inner.x.saturating_add(inner.width)
-            || mouse.row < inner.y
-            || mouse.row >= inner.y.saturating_add(inner.height)
+        if mouse.column < outer.x
+            || mouse.column >= outer.x.saturating_add(outer.width)
+            || mouse.row < outer.y
+            || mouse.row >= outer.y.saturating_add(outer.height)
         {
-            return;
+            return false;
         }
-        if let Some(popup) = self.state.popup_pane.as_mut() {
-            popup.focused = true;
+        if let Some(ws_idx) = self.state.active {
+            if let Some(popup) = self.state.popup_pane.as_ref() {
+                let pane_id = popup.pane_id;
+                self.focus_pane_internal_via_api(ws_idx, pane_id);
+            }
         }
-        let Some(rt) = self.popup_runtime() else {
-            self.close_popup_pane();
-            return;
-        };
-        let column = mouse.column.saturating_sub(inner.x);
-        let row = mouse.row.saturating_sub(inner.y);
-        let bytes = match mouse.kind {
-            MouseEventKind::ScrollUp
-            | MouseEventKind::ScrollDown
-            | MouseEventKind::ScrollLeft
-            | MouseEventKind::ScrollRight => match rt.wheel_routing() {
-                Some(crate::pane::WheelRouting::MouseReport) => {
-                    rt.encode_mouse_wheel(mouse.kind, column, row, mouse.modifiers)
-                }
-                Some(crate::pane::WheelRouting::AlternateScroll) => {
-                    rt.encode_alternate_scroll(mouse.kind)
-                }
-                Some(crate::pane::WheelRouting::HostScroll) | None => {
-                    let lines_per_notch = self.state.mouse_scroll_lines;
-                    match mouse.kind {
-                        MouseEventKind::ScrollUp => rt.scroll_up(lines_per_notch),
-                        MouseEventKind::ScrollDown => rt.scroll_down(lines_per_notch),
-                        _ => {}
+        if let Some(rt) = self.popup_runtime() {
+            if mouse.column < inner.x
+                || mouse.column >= inner.x.saturating_add(inner.width)
+                || mouse.row < inner.y
+                || mouse.row >= inner.y.saturating_add(inner.height)
+            {
+                return true;
+            }
+            let column = mouse.column.saturating_sub(inner.x);
+            let row = mouse.row.saturating_sub(inner.y);
+            let bytes = match mouse.kind {
+                MouseEventKind::ScrollUp
+                | MouseEventKind::ScrollDown
+                | MouseEventKind::ScrollLeft
+                | MouseEventKind::ScrollRight => match rt.wheel_routing() {
+                    Some(crate::pane::WheelRouting::MouseReport) => {
+                        rt.encode_mouse_wheel(mouse.kind, column, row, mouse.modifiers)
                     }
-                    return;
+                    Some(crate::pane::WheelRouting::AlternateScroll) => {
+                        rt.encode_alternate_scroll(mouse.kind)
+                    }
+                    Some(crate::pane::WheelRouting::HostScroll) | None => {
+                        let lines_per_notch = self.state.mouse_scroll_lines;
+                        match mouse.kind {
+                            MouseEventKind::ScrollUp => rt.scroll_up(lines_per_notch),
+                            MouseEventKind::ScrollDown => rt.scroll_down(lines_per_notch),
+                            _ => {}
+                        }
+                        return true;
+                    }
+                },
+                MouseEventKind::Down(_) | MouseEventKind::Up(_) | MouseEventKind::Drag(_) => {
+                    rt.encode_mouse_button(mouse.kind, column, row, mouse.modifiers)
                 }
-            },
-            MouseEventKind::Down(_) | MouseEventKind::Up(_) | MouseEventKind::Drag(_) => {
-                rt.encode_mouse_button(mouse.kind, column, row, mouse.modifiers)
+                MouseEventKind::Moved => {
+                    rt.encode_mouse_motion(mouse.kind, column, row, mouse.modifiers)
+                }
+            };
+            let Some(bytes) = bytes else {
+                return true;
+            };
+            rt.scroll_reset();
+            if let Err(err) = rt.try_send_bytes(Bytes::from(bytes)) {
+                warn!(err = %err, kind = ?mouse.kind, "failed to forward popup mouse event");
             }
-            MouseEventKind::Moved => {
-                rt.encode_mouse_motion(mouse.kind, column, row, mouse.modifiers)
-            }
-        };
-        let Some(bytes) = bytes else {
-            return;
-        };
-        rt.scroll_reset();
-        if let Err(err) = rt.try_send_bytes(Bytes::from(bytes)) {
-            warn!(err = %err, kind = ?mouse.kind, "failed to forward popup mouse event");
         }
+        true
     }
 
     fn focus_pane_before_mouse_press(&mut self, mouse: MouseEvent) {

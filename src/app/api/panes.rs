@@ -159,13 +159,53 @@ impl App {
         let Some((ws_idx, pane_id)) = self.parse_pane_id(&target.pane_id) else {
             return pane_not_found(id, &target.pane_id);
         };
-        let Some(_tab_idx) = self.state.workspaces[ws_idx].find_tab_index_for_pane(pane_id) else {
+        let is_popup = self
+            .state
+            .popup_pane
+            .as_ref()
+            .is_some_and(|p| p.pane_id == pane_id);
+        if !is_popup
+            && self.state.workspaces[ws_idx]
+                .find_tab_index_for_pane(pane_id)
+                .is_none()
+        {
             return pane_not_found(id, &target.pane_id);
-        };
+        }
 
         self.state.focus_pane_in_workspace(ws_idx, pane_id);
         self.state.mark_active_tab_seen();
         self.state.settle_terminal_mode_after_focus();
+
+        if is_popup {
+            let Some(public_pane_id) = self.public_pane_id(ws_idx, pane_id) else {
+                return pane_not_found(id, &target.pane_id);
+            };
+            let popup = self.state.popup_pane.as_ref().unwrap();
+            let pane = PaneInfo {
+                pane_id: public_pane_id,
+                terminal_id: popup.terminal_id.to_string(),
+                workspace_id: self.public_workspace_id(ws_idx),
+                tab_id: self
+                    .public_tab_id(ws_idx, self.state.workspaces[ws_idx].active_tab)
+                    .unwrap_or_default(),
+                focused: popup.focused,
+                cwd: None,
+                foreground_cwd: None,
+                label: None,
+                agent: None,
+                title: None,
+                terminal_title: None,
+                terminal_title_stripped: None,
+                display_agent: None,
+                agent_status: crate::api::schema::AgentStatus::Idle,
+                state_labels: std::collections::HashMap::new(),
+                tokens: std::collections::HashMap::new(),
+                agent_session: None,
+                scroll: None,
+                revision: 1,
+            };
+            return encode_success(id, ResponseResult::PaneInfo { pane });
+        }
 
         let Some(pane) = self.pane_info(ws_idx, pane_id) else {
             return pane_not_found(id, &target.pane_id);

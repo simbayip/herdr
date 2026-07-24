@@ -1691,6 +1691,11 @@ impl AppState {
         ws_idx: usize,
         pane_id: crate::layout::PaneId,
     ) -> Option<&'a crate::terminal::TerminalRuntime> {
+        if let Some(popup) = self.popup_pane.as_ref() {
+            if popup.pane_id == pane_id {
+                return terminal_runtimes.get(&popup.terminal_id);
+            }
+        }
         #[cfg(test)]
         if let Some(runtime) = self.workspaces.get(ws_idx)?.test_runtimes.get(&pane_id) {
             return Some(runtime);

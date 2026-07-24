@@ -313,4 +313,103 @@ mod tests {
         let response: crate::api::schema::ErrorResponse = serde_json::from_str(&response).unwrap();
         assert_eq!(response.error.code, "popup_not_open");
     }
+
+    #[test]
+    fn unfocusing_popup_pane_restores_workspace_focus_and_pane_infos() {
+        let mut app = app_with_popup();
+        let ws_pane_id = app.state.workspaces[0].focused_pane_id().unwrap();
+
+        assert!(app.state.popup_pane.as_ref().unwrap().focused);
+
+        let pane_infos = crate::ui::compute_tab_surface(
+            &app.state,
+            &crate::terminal::TerminalRuntimeRegistry::new(),
+            ratatui::layout::Rect::new(0, 0, 80, 24),
+            false,
+            Default::default(),
+        )
+        .pane_infos;
+        assert!(pane_infos.iter().all(|p| !p.is_focused));
+
+        assert!(app.state.focus_pane_in_workspace(0, ws_pane_id));
+        assert!(!app.state.popup_pane.as_ref().unwrap().focused);
+
+        let pane_infos = crate::ui::compute_tab_surface(
+            &app.state,
+            &crate::terminal::TerminalRuntimeRegistry::new(),
+            ratatui::layout::Rect::new(0, 0, 80, 24),
+            false,
+            Default::default(),
+        )
+        .pane_infos;
+        let focused_pane = pane_infos.iter().find(|p| p.is_focused);
+        assert!(focused_pane.is_some());
+        assert_eq!(focused_pane.unwrap().id, ws_pane_id);
+    }
+
+    #[test]
+    fn mouse_click_outside_and_inside_popup_overlay_toggles_focus() {
+        let mut app = app_with_popup();
+        app.state.mode = Mode::Terminal;
+        let area = ratatui::layout::Rect::new(0, 0, 100, 40);
+        app.state.view.terminal_area = area;
+        let surface = crate::ui::compute_tab_surface(
+            &app.state,
+            &crate::terminal::TerminalRuntimeRegistry::new(),
+            area,
+            false,
+            Default::default(),
+        );
+        app.state.view.pane_infos = surface.pane_infos;
+
+        let click_outside = crossterm::event::MouseEvent {
+            kind: crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Left),
+            column: 2,
+            row: 2,
+            modifiers: crossterm::event::KeyModifiers::empty(),
+        };
+        app.handle_mouse(click_outside);
+
+        assert!(!app.state.popup_pane.as_ref().unwrap().focused);
+
+        let (outer, _inner) = crate::ui::popup_pane_rects(&app.state, area).unwrap();
+        app.state.view.terminal_area = area;
+        let click_inside = crossterm::event::MouseEvent {
+            kind: crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Left),
+            column: outer.x + 2,
+            row: outer.y + 2,
+            modifiers: crossterm::event::KeyModifiers::empty(),
+        };
+        app.handle_mouse(click_inside);
+
+        assert!(app.state.popup_pane.as_ref().unwrap().focused);
+    }
+
+    #[test]
+    fn directional_focus_navigates_between_popup_and_workspace_panes() {
+        let mut app = app_with_popup();
+        app.state.mode = Mode::Terminal;
+        let area = ratatui::layout::Rect::new(0, 0, 100, 40);
+        app.state.view.terminal_area = area;
+        let left_pane = app.state.workspaces[0].focused_pane_id().unwrap();
+        let _right_pane = app.state.workspaces[0]
+            .active_tab_mut()
+            .unwrap()
+            .layout
+            .split_focused_with_ratio(ratatui::layout::Direction::Horizontal, 0.2);
+        app.state.workspaces[0]
+            .active_tab_mut()
+            .unwrap()
+            .layout
+            .focus_pane(left_pane);
+
+        assert!(app.state.popup_pane.as_ref().unwrap().focused);
+
+        app.focus_pane_direction_via_api(crate::layout::NavDirection::Left);
+        assert!(!app.state.popup_pane.as_ref().unwrap().focused);
+
+        let popup_pane_id = app.state.popup_pane.as_ref().unwrap().pane_id;
+        app.focus_pane_internal_via_api(0, popup_pane_id);
+        assert!(app.state.popup_pane.as_ref().unwrap().focused);
+    }
 }
