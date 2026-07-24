@@ -401,7 +401,7 @@ impl App {
             );
         }
         match placement {
-            PluginPanePlacement::Overlay | PluginPanePlacement::Popup => {
+            PluginPanePlacement::Overlay => {
                 if params.workspace_id.is_some()
                     || params.target_pane_id.is_some()
                     || params.direction.is_some()
@@ -409,7 +409,16 @@ impl App {
                     return encode_error(
                         id,
                         "invalid_params",
-                        "overlay and popup plugin panes target the active pane",
+                        "overlay plugin panes target the active pane",
+                    );
+                }
+            }
+            PluginPanePlacement::Popup => {
+                if params.workspace_id.is_some() || params.direction.is_some() {
+                    return encode_error(
+                        id,
+                        "invalid_params",
+                        "popup plugin panes do not support workspace_id or direction",
                     );
                 }
             }

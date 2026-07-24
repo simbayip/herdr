@@ -10,6 +10,7 @@ use crate::terminal::{TerminalId, TerminalRuntime, TerminalState};
 pub(crate) struct PopupGeometry {
     pub width: Option<PopupSize>,
     pub height: Option<PopupSize>,
+    pub target_pane_id: Option<PaneId>,
 }
 
 impl App {
@@ -182,6 +183,8 @@ impl App {
             terminal_id,
             width: geometry.width,
             height: geometry.height,
+            target_pane_id: geometry.target_pane_id,
+            focused: true,
         });
         self.state.mode = Mode::Terminal;
         Ok(())
@@ -206,6 +209,8 @@ impl App {
             terminal_id: terminal_id.clone(),
             width: None,
             height: None,
+            target_pane_id: None,
+            focused: true,
         });
         (pane_id, terminal_id)
     }
@@ -237,6 +242,8 @@ mod tests {
             terminal_id,
             width: None,
             height: None,
+            target_pane_id: None,
+            focused: true,
         });
         app
     }

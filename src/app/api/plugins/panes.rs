@@ -22,13 +22,22 @@ impl App {
                 Err((code, message)) => return encode_error(id, &code, message),
             };
         let cwd = Some(self.plugin_pane_cwd(plugin, params.cwd));
+        let target_pane_id = params
+            .target_pane_id
+            .as_deref()
+            .and_then(|id_str| self.parse_pane_id(id_str))
+            .map(|(_ws_idx, pane_id)| pane_id);
         let width = params.width.or(pane.width);
         let height = params.height.or(pane.height);
         if let Err(err) = self.spawn_popup_argv_command(
             &pane.command,
             cwd,
             extra_env,
-            crate::app::popup::PopupGeometry { width, height },
+            crate::app::popup::PopupGeometry {
+                width,
+                height,
+                target_pane_id,
+            },
         ) {
             return encode_error(id, "plugin_pane_open_failed", err.to_string());
         }

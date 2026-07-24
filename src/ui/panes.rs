@@ -290,6 +290,12 @@ pub(super) fn compute_pane_infos(
         info.scrollbar_rect = scrollbar_rect;
     }
 
+    if app.popup_pane.as_ref().is_some_and(|p| p.focused) {
+        for info in &mut pane_infos {
+            info.is_focused = false;
+        }
+    }
+
     pane_infos
 }
 
@@ -369,7 +375,17 @@ pub(super) fn render_panes(
 
 pub(crate) fn popup_pane_rects(app: &AppState, area: Rect) -> Option<(Rect, Rect)> {
     let popup = app.popup_pane.as_ref()?;
-    resolve_popup_geometry(popup.width, popup.height, area)
+    let target_area = popup
+        .target_pane_id
+        .and_then(|target_id| {
+            app.view
+                .pane_infos
+                .iter()
+                .find(|info| info.id == target_id)
+                .map(|info| info.rect)
+        })
+        .unwrap_or(area);
+    resolve_popup_geometry(popup.width, popup.height, target_area)
         .map(|geometry| (geometry.outer, geometry.inner))
 }
 
