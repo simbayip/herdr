@@ -793,12 +793,16 @@ impl App {
         &mut self,
         outer_event: Option<crate::ghostty::FocusEvent>,
     ) {
-        let current_focus = self.state.active.and_then(|idx| {
-            self.state
-                .workspaces
-                .get(idx)
-                .and_then(|ws| ws.focused_pane_id().map(|pane_id| (idx, pane_id)))
-        });
+        let current_focus = if let Some(popup) = self.state.popup_pane.as_ref().filter(|p| p.focused) {
+            self.state.active.map(|idx| (idx, popup.pane_id))
+        } else {
+            self.state.active.and_then(|idx| {
+                self.state
+                    .workspaces
+                    .get(idx)
+                    .and_then(|ws| ws.focused_pane_id().map(|pane_id| (idx, pane_id)))
+            })
+        };
         if current_focus == self.last_focus {
             if let (Some((ws_idx, pane_id)), Some(event)) = (current_focus, outer_event) {
                 self.send_pane_focus_event(ws_idx, pane_id, event);
