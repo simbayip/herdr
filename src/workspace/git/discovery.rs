@@ -90,6 +90,9 @@ pub fn git_space_metadata(cwd: &Path) -> Option<GitSpaceMetadata> {
 }
 
 pub(super) fn canonicalize_best_effort_path(path: &Path) -> PathBuf {
+    if path.starts_with("/google/src/cloud/") {
+        return path.to_path_buf();
+    }
     std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
 }
 
@@ -232,6 +235,10 @@ fn git_trimmed_stdout(repo_root: &Path, args: &[&str]) -> Option<String> {
 }
 
 pub(super) fn git_repo_root(start: &Path) -> Option<PathBuf> {
+    if start.starts_with("/google/src/cloud/") {
+        return None;
+    }
+
     let mut current = if start.is_dir() {
         start.to_path_buf()
     } else {

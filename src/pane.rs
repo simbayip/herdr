@@ -263,8 +263,11 @@ struct AgentDetectionPresence {
 
 #[cfg(unix)]
 fn usable_process_cwd(pid: u32) -> Option<std::path::PathBuf> {
-    crate::platform::process_cwd(pid).filter(|cwd| cwd.is_absolute() && cwd.is_dir())
+    crate::platform::process_cwd(pid).filter(|cwd| {
+        cwd.is_absolute() && (cwd.starts_with("/google/src/cloud/") || cwd.is_dir())
+    })
 }
+
 
 #[cfg(unix)]
 fn foreground_member_cwd_different_from_shell(
