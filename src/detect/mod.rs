@@ -165,8 +165,19 @@ pub fn interactive_agent_executable(agent: Agent) -> &'static str {
 }
 
 pub fn parse_agent_label(agent: &str) -> Option<Agent> {
-    let name = normalized_agent_lookup_name(agent);
-    parse_canonical_agent_label(&name).or_else(|| lookup_agent(&name))
+    let base = path_basename(agent);
+    let name = normalized_agent_lookup_name(base);
+    if let Some(a) = parse_canonical_agent_label(&name).or_else(|| lookup_agent(&name)) {
+        return Some(a);
+    }
+    let full = normalized_agent_lookup_name(agent);
+    if let Some(a) = lookup_agent(&full) {
+        return Some(a);
+    }
+    if full.contains("jetski") {
+        return Some(Agent::Antigravity);
+    }
+    None
 }
 
 pub(crate) fn parse_canonical_agent_label(label: &str) -> Option<Agent> {
@@ -182,7 +193,7 @@ fn lookup_agent(name: &str) -> Option<Agent> {
         "gemini" => Some(Agent::Gemini),
         "cursor" | "cursor-agent" => Some(Agent::Cursor),
         "devin" | "devin-cli" | "devin cli" => Some(Agent::Devin),
-        "agy" | "antigravity" | "antigravity-cli" => Some(Agent::Antigravity),
+        "agy" | "antigravity" | "antigravity-cli" | "jetski" => Some(Agent::Antigravity),
         "cline" => Some(Agent::Cline),
         "omp" => Some(Agent::Omp),
         "mastracode" | "mastra-code" | "mastra code" => Some(Agent::Mastracode),
@@ -331,6 +342,12 @@ fn normalized_process_name(process: &crate::platform::ForegroundProcess) -> Stri
 
     if identify_agent(effective).is_some() {
         return effective.to_string();
+    }
+
+    if let Some(cmdline) = process.cmdline.as_deref() {
+        if cmdline.to_lowercase().contains("jetski") {
+            return "jetski".to_string();
+        }
     }
 
     if let Some(wrapped_agent) = argv0_agent_name(process.argv.as_deref())
@@ -663,6 +680,11 @@ mod tests {
         assert_eq!(identify_agent("devin-cli"), Some(Agent::Devin));
         assert_eq!(identify_agent("agy"), Some(Agent::Antigravity));
         assert_eq!(identify_agent("antigravity-cli"), Some(Agent::Antigravity));
+        assert_eq!(identify_agent("jetski"), Some(Agent::Antigravity));
+        assert_eq!(
+            identify_agent("/google/bin/releases/jetski-devs/tools/cli"),
+            Some(Agent::Antigravity)
+        );
         assert_eq!(identify_agent("cline"), Some(Agent::Cline));
         assert_eq!(identify_agent("omp"), Some(Agent::Omp));
         assert_eq!(identify_agent("mastracode"), Some(Agent::Mastracode));
